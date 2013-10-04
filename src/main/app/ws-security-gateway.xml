@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<mule xmlns="http://www.mulesoft.org/schema/mule/core" 
+	xmlns:http="http://www.mulesoft.org/schema/mule/http"
+	xmlns:cxf="http://www.mulesoft.org/schema/mule/cxf"
+	xmlns:https="http://www.mulesoft.org/schema/mule/https"
+	xmlns:context="http://www.springframework.org/schema/context"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:spring="http://www.springframework.org/schema/beans" version="EE-3.5.0"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="
+http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd 
+http://www.mulesoft.org/schema/mule/cxf http://www.mulesoft.org/schema/mule/cxf/current/mule-cxf.xsd 
+http://www.mulesoft.org/schema/mule/https http://www.mulesoft.org/schema/mule/https/current/mule-https.xsd 
+http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-current.xsd
+http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context-3.0.xsd">
+
+	<context:property-placeholder location="environment.properties"/>
+	
+	<spring:bean id="wss4jInInterceptor" class="com.github.nblair.cxf.wss4j.ResourceLoaderAwareWSS4JInInterceptor">
+		<spring:constructor-arg>
+			<spring:map>
+				<spring:entry key="action" value="Timestamp Signature Encrypt" />
+				<spring:entry key="decryptionPropFile" value="${signaturePropFile}" />
+				<spring:entry key="signaturePropFile" value="${signaturePropFile}" />
+				<spring:entry key="signatureUser" value="${signatureUser}" />
+				<!-- a passwordCallbackClass is required -->
+				<!-- if using NoopCallbackHandler here, must supply private keypair password in signaturePropFile -->
+				<!-- alternatively, skip inclusion of keypair password in signaturePropfile and implement CallbackHandler differently  -->
+				<spring:entry key="passwordCallbackClass" value="com.github.nblair.wssecurity.NoopCallbackHandler" />
+			</spring:map>
+		</spring:constructor-arg>
+	</spring:bean>
+	<spring:bean id="wss4jOutInterceptor" class="com.github.nblair.cxf.wss4j.ResourceLoaderAwareWSS4JOutInterceptor">
+		<spring:constructor-arg>
+			<spring:map>
+				<spring:entry key="action" value="Timestamp Signature Encrypt" />
+				<spring:entry key="encryptionPropFile" value="${encryptionPropFile}" />
+				<spring:entry key="signaturePropFile" value="${signaturePropFile}" />
+				<spring:entry key="user" value="${encryptionUser}" />
+				<spring:entry key="signatureUser" value="${signatureUser}" />
+				<spring:entry key="signatureKeyIdentifier" value="IssuerSerial"/>
+				<!-- a passwordCallbackClass is required even though it's not used on this interceptor -->
+				<spring:entry key="passwordCallbackClass" value="com.github.nblair.wssecurity.NoopCallbackHandler" />
+				<spring:entry key="isBSPCompliant" value="false" />
+				<spring:entry key="encryptionSymAlgorithm" value="http://www.w3.org/2001/04/xmlenc#aes128-cbc"/>
+				<spring:entry key="signatureAlgorithm" value="http://www.w3.org/2000/09/xmldsig#rsa-sha1"/>
+			</spring:map>
+		</spring:constructor-arg>
+	</spring:bean>
+	
+	<flow name="BalanceInquiryServiceBridge">
+		<http:inbound-endpoint exchange-pattern="request-response"
+			host="${internal.endpoint.hostname}" port="${internal.endpoint.port}" path="${internal.endpoint.path}" />
+		<!-- if you need to replay SOAPAction header, uncomment the following copy-properties line: -->
+		<!--  <copy-properties propertyName="SOAPAction" /> -->
+		<!-- 
+			Note: value of "body" for the payload attribute is required on BOTH proxy-service and proxy-client for the 
+			WSS4J interceptors to work properly.
+		-->
+		<cxf:proxy-service payload="body" soapVersion="${soap.version}" 
+			wsdlLocation="${endpoint.wsdl}"
+			namespace="${endpoint.namespace}"
+			service="${endpoint.namespace}"/>
+		<cxf:proxy-client payload="body" soapVersion="${soap.version}">
+			<cxf:inInterceptors>
+				<spring:ref bean="wss4jInInterceptor"/>
+			</cxf:inInterceptors>
+			<cxf:outInterceptors>
+				<spring:ref bean="wss4jOutInterceptor"/>
+			</cxf:outInterceptors>
+		</cxf:proxy-client>
+		<https:outbound-endpoint exchange-pattern="request-response"
+			host="${remote.endpoint.hostname}" port="${remote.endpoint.port}"
+			path="${remote.endpoint.path}" />
+	</flow>		
+	
+</mule>
